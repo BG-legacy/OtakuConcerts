@@ -41,6 +41,7 @@ OtakuConcerts uses a client-server architecture:
 - **Client**: Terminal-based client application for user interaction
 - **Communication**: JSON-formatted data exchange over TCP sockets
 - **Security**: Basic authentication system (expandable for production)
+- **Platform**: Built and tested on Ubuntu Linux
 
 ## 🛠️ Getting Started
 
