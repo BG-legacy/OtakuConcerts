@@ -10,32 +10,32 @@ cursor = conn.cursor()  # Create a cursor object to execute SQL commands
 # Create tables if they don't exist
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,  # Unique user ID, auto-incremented
-        username TEXT UNIQUE,  # Username (must be unique)
-        password TEXT,  # User password (stored as plain text - not secure for production)
-        points INTEGER DEFAULT 100  # User's point balance, starts with 100 points
+        id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Unique user ID, auto-incremented
+        username TEXT UNIQUE,  -- Username (must be unique)
+        password TEXT,  -- User password (stored as plain text - not secure for production)
+        points INTEGER DEFAULT 100  -- User's point balance, starts with 100 points
     )
 """)
 
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,  # Unique event ID, auto-incremented
-        name TEXT,  # Name of the event/concert
-        available_tickets INTEGER,  # Number of regular tickets available
-        vip_tickets INTEGER DEFAULT 10,  # Number of VIP tickets available, defaults to 10
-        regular_cost INTEGER,  # Cost in points for regular tickets
-        vip_cost INTEGER  # Cost in points for VIP tickets
+        id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Unique event ID, auto-incremented
+        name TEXT,  -- Name of the event/concert
+        available_tickets INTEGER,  -- Number of regular tickets available
+        vip_tickets INTEGER DEFAULT 10,  -- Number of VIP tickets available, defaults to 10
+        regular_cost INTEGER,  -- Cost in points for regular tickets
+        vip_cost INTEGER  -- Cost in points for VIP tickets
     )
 """)
 
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS purchases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,  # Unique purchase ID, auto-incremented
-        user_id INTEGER,  # ID of user who made the purchase
-        event_id INTEGER,  # ID of event for which ticket was purchased
-        ticket_type TEXT,  # Type of ticket (Regular or VIP)
-        FOREIGN KEY(user_id) REFERENCES users(id),  # Foreign key constraint to users table
-        FOREIGN KEY(event_id) REFERENCES events(id)  # Foreign key constraint to events table
+        id INTEGER PRIMARY KEY AUTOINCREMENT,  -- Unique purchase ID, auto-incremented
+        user_id INTEGER,  -- ID of user who made the purchase
+        event_id INTEGER,  -- ID of event for which ticket was purchased
+        ticket_type TEXT,  -- Type of ticket (Regular or VIP)
+        FOREIGN KEY(user_id) REFERENCES users(id),  -- Foreign key constraint to users table
+        FOREIGN KEY(event_id) REFERENCES events(id)  -- Foreign key constraint to events table
     )
 """)
 
