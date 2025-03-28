@@ -79,7 +79,6 @@ OtakuConcerts uses a client-server architecture:
 5. **Earn Discounts**: Get 10% off after your third purchase!
 
 
-
 ---
 
 <div align="center">

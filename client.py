@@ -24,12 +24,34 @@ def send_request(action, data={}):
     Returns:
         dict: The server's response parsed from JSON
     """
-    request = {"action": action}  # Create request dictionary with action
-    request.update(data)  # Add additional data to the request
-    client.send(json.dumps(request).encode())  # Convert to JSON, encode to bytes, and send
-    response_data = client.recv(4096).decode()  # Receive response (4096 bytes buffer), decode from bytes
-    response = json.loads(response_data)  # Parse JSON response into a dictionary
-    return response  # Return the parsed response
+    try:
+        request = {"action": action}  # Create request dictionary with action
+        request.update(data)  # Add additional data to the request
+        client.send(json.dumps(request).encode())  # Convert to JSON, encode to bytes, and send
+        
+        # Receive response in chunks until complete
+        chunks = []
+        while True:
+            chunk = client.recv(4096).decode()  # Receive chunk (4096 bytes buffer), decode from bytes
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if chunk.endswith('\n'):  # If we received a complete message
+                break
+        
+        response_data = ''.join(chunks)  # Combine all chunks
+        if not response_data:
+            raise Exception("No response received from server")
+            
+        response = json.loads(response_data)  # Parse JSON response into a dictionary
+        return response  # Return the parsed response
+    except json.JSONDecodeError as e:
+        print(f"Error decoding server response: {e}")
+        print(f"Raw response: {response_data}")
+        raise
+    except Exception as e:
+        print(f"Error in send_request: {e}")
+        raise
 
 def login():
     """
@@ -79,9 +101,9 @@ def purchase_ticket():
         return
         
     event_id = input("Enter event ID to purchase: ")  # Prompt for event ID
-    ticket_type = input("Choose ticket type (Regular/VIP): ").strip().capitalize()  # Prompt for ticket type
+    ticket_type = input("Choose ticket type (Regular/VIP): ").strip().title()  # Prompt for ticket type and normalize input
     if ticket_type not in ["Regular", "VIP"]:  # Validate ticket type input
-        print("Invalid ticket type.")  # Inform user of invalid selection
+        print("Invalid ticket type. Please choose either 'Regular' or 'VIP'.")  # Inform user of invalid selection
         return
     # Send purchase request to server
     response = send_request("purchase_ticket", {"user_id": user_id, "event_id": event_id, "ticket_type": ticket_type})
@@ -110,16 +132,67 @@ def view_events():
     """
     Retrieves and displays all available events.
     """
-    # Send request to get list of events
-    response = send_request("view_events")
-    if response["status"] == "success":  # Check if request was successful
-        print("\nAvailable Events:")  # Print header
-        print("ID | Event Name | Regular Cost | VIP Cost")  # Print column headers
-        print("-" * 50)  # Print separator line
-        for event in response["events"]:  # Iterate through each event in the response
-            # Print event details: ID, name, regular price, VIP price
-            print(f"{event[0]} | {event[1]} | Regular: {event[4]} points | VIP: {event[5]} points")
-        print()  # Print blank line after events list
+    try:
+        # Send request to get list of events
+        response = send_request("view_events")
+        if response["status"] == "success":  # Check if request was successful
+            print("\nAvailable Events:")  # Print header
+            print("ID | Event Name | Regular Tickets | VIP Tickets | Regular Cost | VIP Cost")  # Print column headers
+            print("-" * 80)  # Print separator line
+            for event in response["events"]:  # Iterate through each event in the response
+                # Print event details in a formatted way
+                print(f"{event['id']} | {event['name']} | {event['available_tickets']} | {event['vip_tickets']} | {event['regular_cost']} points | {event['vip_cost']} points")
+            print()  # Print blank line after events list
+        else:
+            print("Error viewing events:", response.get("message", "Unknown error"))
+    except json.JSONDecodeError:
+        print("Error: Received invalid response from server")
+    except Exception as e:
+        print(f"Error viewing events: {str(e)}")
+
+def add_funds():
+    """
+    Handles adding funds to the user's balance.
+    """
+    global points  # Use global points variable so we can modify it
+    if user_id is None:  # Check if user is logged in
+        print("Please login first.")  # Inform user login is required
+        return
+        
+    try:
+        amount = int(input("Enter amount to add: "))  # Prompt for amount to add
+        if amount <= 0:
+            print("Amount must be greater than 0.")
+            return
+            
+        # Send request to add funds
+        response = send_request("add_funds", {"userid": user_id, "amount": amount})
+        print(response["message"])  # Display response message from server
+        
+        if response["status"] == "success":  # Check if request was successful
+            check_points()  # Refresh points balance from server
+    except ValueError:
+        print("Please enter a valid number.")
+
+def view_purchases():
+    """
+    Handles viewing the user's purchase history.
+    """
+    global points
+    if user_id is None:
+        print("Please login first")
+        return
+    response = send_request("view_purchases", {"user_id": user_id})
+    if response["status"] == "success":
+        print("\nPurchase History:")
+        for purchase in response["purchases"]:
+            print(f"Purchase ID: {purchase[0]}")
+            print(f"Event ID: {purchase[1]}")
+            print(f"Ticket Type: {purchase[2]}")
+            print(f"Purchase Date: {purchase[3]}")
+            print("-" * 50)
+    else:
+        print("Error viewing purchases:", response.get("message", "Unknown error"))
 
 def main():
     """
@@ -148,7 +221,7 @@ def main():
     
     # Main menu loop (after login)
     while user_id is not None:  # Loop while user is logged in
-        print("\n1. View Events | 2. Buy Ticket | 3. Check Points | 4. Logout | 5. Exit")  # Display main menu
+        print("\n1. View Events | 2. Buy Ticket | 3. Check Points | 4. Logout | 5. Add Funds | 6. View Purchases | 7. Exit")  # Display main menu
         choice = input("> ")  # Get user choice
         if choice == "1":  # User chose view events
             view_events()  # Display events
@@ -161,7 +234,11 @@ def main():
             print("Logged out successfully.")  # Display logout confirmation
             main()  # Restart the login flow
             return  # Return from current main() call (prevents stacking)
-        elif choice == "5":  # User chose exit
+        elif choice == "5":  # User chose add funds
+            add_funds()  # Process add funds
+        elif choice == "6":  # User chose view purchases
+            view_purchases()  # Display purchase history
+        elif choice == "7":  # User chose exit
             print("Goodbye!")  # Display exit message
             break  # Exit the loop
         else:

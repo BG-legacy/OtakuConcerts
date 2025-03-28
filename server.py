@@ -42,22 +42,24 @@ cursor.execute("""
 conn.commit()  # Commit the table creation transactions to the database
 
 # Insert Anime Concerts (Only run this once)
-cursor.executemany("""
-    INSERT INTO events (name, available_tickets, vip_tickets, regular_cost, vip_cost) VALUES (?, ?, ?, ?, ?)
-""", [
-    # Event data: (name, regular_tickets, vip_tickets, regular_cost, vip_cost)
-    ("LiSA Live Concert", 50, 10, 40, 80),
-    ("Eir Aoi Anime Night", 60, 10, 30, 70),
-    ("Aimer: The Nightingale Tour", 70, 10, 35, 75),
-    ("Yuki Kajiura: Fate Soundtracks Live", 40, 5, 50, 100),
-    ("Hiroyuki Sawano: Attack on Titan OST Concert", 80, 8, 45, 90),
-    ("Kenshi Yonezu: Chainsaw Man Opening Live", 100, 12, 50, 100),
-    ("ClariS Special Anime Live", 55, 10, 25, 60),
-    ("FLOW Naruto & Code Geass Concert", 90, 15, 30, 70),
-    ("ReoNa SAO Alicization Tour", 65, 10, 35, 75),
-    ("fripSide: Railgun Electro Night", 75, 10, 40, 85)
-])
-conn.commit()  # Commit the event insertions to the database
+cursor.execute("SELECT COUNT(*) FROM events")  # Check if events already exist
+if cursor.fetchone()[0] == 0:  # Only insert if no events exist
+    cursor.executemany("""
+        INSERT INTO events (name, available_tickets, vip_tickets, regular_cost, vip_cost) VALUES (?, ?, ?, ?, ?)
+    """, [
+        # Event data: (name, regular_tickets, vip_tickets, regular_cost, vip_cost)
+        ("LiSA Live Concert", 50, 10, 40, 80),
+        ("Eir Aoi Anime Night", 60, 10, 30, 70),
+        ("Aimer: The Nightingale Tour", 70, 10, 35, 75),
+        ("Yuki Kajiura: Fate Soundtracks Live", 40, 5, 50, 100),
+        ("Hiroyuki Sawano: Attack on Titan OST Concert", 80, 8, 45, 90),
+        ("Kenshi Yonezu: Chainsaw Man Opening Live", 100, 12, 50, 100),
+        ("ClariS Special Anime Live", 55, 10, 25, 60),
+        ("FLOW Naruto & Code Geass Concert", 90, 15, 30, 70),
+        ("ReoNa SAO Alicization Tour", 65, 10, 35, 75),
+        ("fripSide: Railgun Electro Night", 75, 10, 40, 85)
+    ])
+    conn.commit()  # Commit the event insertions to the database
 
 # Server setup
 HOST = "127.0.0.1"  # Localhost IP address
@@ -67,6 +69,21 @@ server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket 
 server.bind((HOST, PORT))  # Bind socket to the specified host and port
 server.listen(5)  # Listen for connections, queue up to 5 connection requests
 print("Server is running...")  # Display server startup message
+
+def send_response(client_socket, response_data):
+    """
+    Helper function to send JSON response to client with proper encoding and newline.
+    
+    Args:
+        client_socket: Socket object for the client connection
+        response_data: Dictionary containing the response data
+    """
+    try:
+        json_response = json.dumps(response_data) + '\n'  # Add newline to mark end of message
+        client_socket.send(json_response.encode())
+    except Exception as e:
+        print(f"Error sending response: {e}")
+        raise
 
 def handle_client(client_socket):
     """
@@ -92,10 +109,10 @@ def handle_client(client_socket):
                     cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
                     conn.commit()  # Commit the transaction
                     # Send success response to client
-                    client_socket.send(json.dumps({"status": "success", "message": "User registered successfully"}).encode())
+                    send_response(client_socket, {"status": "success", "message": "User registered successfully"})
                 except sqlite3.IntegrityError:  # Handle case where username already exists
                     # Send error response to client
-                    client_socket.send(json.dumps({"status": "error", "message": "Username already exists"}).encode())
+                    send_response(client_socket, {"status": "error", "message": "Username already exists"})
 
             elif action == "login":  # Handle user login
                 username = request.get("username")  # Get username from request
@@ -105,16 +122,27 @@ def handle_client(client_socket):
                 user = cursor.fetchone()  # Get first matching row
                 if user:  # Check if user was found
                     # Send success response with user ID and points
-                    client_socket.send(json.dumps({"status": "success", "user_id": user[0], "points": user[1]}).encode())
+                    send_response(client_socket, {"status": "success", "user_id": user[0], "points": user[1]})
                 else:
                     # Send error response if credentials are invalid
-                    client_socket.send(json.dumps({"status": "error", "message": "Invalid credentials"}).encode())
+                    send_response(client_socket, {"status": "error", "message": "Invalid credentials"})
 
             elif action == "view_events":  # Handle request to view all events
                 cursor.execute("SELECT * FROM events")  # Query all events from database
                 events = cursor.fetchall()  # Get all rows from the query
-                # Send success response with events data
-                client_socket.send(json.dumps({"status": "success", "events": events}).encode())
+                # Format events data for JSON serialization
+                formatted_events = []
+                for event in events:
+                    formatted_events.append({
+                        "id": event[0],
+                        "name": event[1],
+                        "available_tickets": event[2],
+                        "vip_tickets": event[3],
+                        "regular_cost": event[4],
+                        "vip_cost": event[5]
+                    })
+                # Send success response with formatted events data
+                send_response(client_socket, {"status": "success", "events": formatted_events})
 
             elif action == "purchase_ticket":  # Handle ticket purchase request
                 user_id = request.get("user_id")  # Get user ID from request
@@ -143,13 +171,13 @@ def handle_client(client_socket):
 
                     if ticket_cost > user_points:  # Check if user has enough points
                         # Send error if not enough points
-                        client_socket.send(json.dumps({"status": "error", "message": "Not enough points"}).encode())
+                        send_response(client_socket, {"status": "error", "message": "Not enough points"})
                     elif ticket_type == "VIP" and vip_tickets <= 0:  # Check if VIP tickets are available
                         # Send error if VIP tickets sold out
-                        client_socket.send(json.dumps({"status": "error", "message": "VIP tickets sold out"}).encode())
+                        send_response(client_socket, {"status": "error", "message": "VIP tickets sold out"})
                     elif ticket_type == "Regular" and available_tickets <= 0:  # Check if regular tickets are available
                         # Send error if regular tickets sold out
-                        client_socket.send(json.dumps({"status": "error", "message": "Regular tickets sold out"}).encode())
+                        send_response(client_socket, {"status": "error", "message": "Regular tickets sold out"})
                     else:
                         # Deduct points from user
                         cursor.execute("UPDATE users SET points = points - ? WHERE id = ?", (ticket_cost, user_id))
@@ -163,7 +191,7 @@ def handle_client(client_socket):
                         cursor.execute("INSERT INTO purchases (user_id, event_id, ticket_type) VALUES (?, ?, ?)", (user_id, event_id, ticket_type))
                         conn.commit()  # Commit all transaction changes
                         # Send success response with purchase details
-                        client_socket.send(json.dumps({"status": "success", "message": f"{ticket_type} Ticket purchased for {ticket_cost} points"}).encode())
+                        send_response(client_socket, {"status": "success", "message": f"{ticket_type} Ticket purchased for {ticket_cost} points"})
             elif action == "check_points":  # Handle request to check points balance
                 user_id = request.get("user_id")  # Get user ID from request
                 # Query user points
@@ -171,13 +199,27 @@ def handle_client(client_socket):
                 user = cursor.fetchone()  # Get user data
                 if user:  # Check if user exists
                     # Send success response with points balance
-                    client_socket.send(json.dumps({"status": "success", "points": user[0]}).encode())
-
+                    send_response(client_socket, {"status": "success", "points": user[0]})
+            elif action == "add_funds":
+                userid = request.get("userid")
+                amount = request.get("amount")
+                if amount <= 0:
+                    send_response(client_socket, {"status": "error", "message": "Invalid amount"})
+                else:
+                    cursor.execute("UPDATE users SET points = points + ? WHERE id = ?", (amount, userid))
+                    conn.commit()
+                    send_response(client_socket, {"status": "success", "message": f"Added {amount} points to user {userid}"})
+            elif action == "view_purchases":
+                user_id = request.get("user_id")
+                cursor.execute("SELECT * FROM purchases WHERE user_id is ? ORDER BY id DESC", (user_id,))
+                purchases = cursor.fetchall()
+                send_response(client_socket, {"status": "success", "purchases": purchases})
+                
         except Exception as e:  # Handle any exceptions that occur
             print("Error:", e)  # Print error to server console
             try:
                 # Try to send error response to client
-                client_socket.send(json.dumps({"status": "error", "message": "An error occurred"}).encode())
+                send_response(client_socket, {"status": "error", "message": "An error occurred"})
             except:
                 pass  # Ignore if sending fails (connection may be closed)
             break  # Exit the loop on error
