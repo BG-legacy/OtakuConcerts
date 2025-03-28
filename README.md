@@ -1,6 +1,7 @@
 # 🎵 OtakuConcerts 🎵
 
-![Anime Concert](https://source.unsplash.com/random/1200x400/?anime+concert)
+![Screenshot 2025-03-25 at 11 40 23 AM](https://github.com/user-attachments/assets/2dac3039-c430-476d-8c0b-708394bb5482)
+
 
 ## 🌟 Experience the Ultimate Anime Concert Ticket Platform! 🌟
 
