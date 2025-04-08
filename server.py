@@ -7,6 +7,89 @@ import threading  # Import threading module to handle multiple client connection
 conn = sqlite3.connect("ticket_system.db", check_same_thread=False)  # Connect to SQLite database, allow access from multiple threads
 cursor = conn.cursor()  # Create a cursor object to execute SQL commands
 
+# Enable foreign keys
+cursor.execute("PRAGMA foreign_keys = ON")
+
+# Function to verify database integrity
+def verify_database_integrity():
+    """Verifies that all tables exist with the correct schema and repairs if needed."""
+    print("Verifying database integrity...")
+    
+    # Check if users table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    if not cursor.fetchone():
+        print("Creating users table...")
+        cursor.execute("""
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                password TEXT,
+                points INTEGER DEFAULT 100
+            )
+        """)
+        
+    # Check if events table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
+    if not cursor.fetchone():
+        print("Creating events table...")
+        cursor.execute("""
+            CREATE TABLE events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT,
+                available_tickets INTEGER,
+                vip_tickets INTEGER DEFAULT 10,
+                regular_cost INTEGER,
+                vip_cost INTEGER
+            )
+        """)
+        
+    # Check if purchases table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='purchases'")
+    if not cursor.fetchone():
+        print("Creating purchases table...")
+        cursor.execute("""
+            CREATE TABLE purchases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                event_id INTEGER,
+                ticket_type TEXT,
+                purchase_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(event_id) REFERENCES events(id)
+            )
+        """)
+    
+    # Verify purchases table has the correct columns
+    try:
+        cursor.execute("PRAGMA table_info(purchases)")
+        columns = cursor.fetchall()
+        column_names = [col[1] for col in columns]
+        
+        # Check if all expected columns exist
+        expected_columns = ["id", "user_id", "event_id", "ticket_type", "purchase_date"]
+        missing_columns = [col for col in expected_columns if col not in column_names]
+        
+        if missing_columns:
+            print(f"Warning: Missing columns in purchases table: {missing_columns}")
+            # Add missing columns
+            for column in missing_columns:
+                if column == "purchase_date":
+                    print(f"Adding missing column: {column}")
+                    # SQLite has limitations on ALTER TABLE - can't add a column with DEFAULT CURRENT_TIMESTAMP
+                    cursor.execute("ALTER TABLE purchases ADD COLUMN purchase_date TIMESTAMP")
+                    # Update existing rows to have the current timestamp
+                    cursor.execute("UPDATE purchases SET purchase_date = CURRENT_TIMESTAMP WHERE purchase_date IS NULL")
+                    conn.commit()
+            print("Database structure updated")
+    except sqlite3.Error as e:
+        print(f"Error verifying purchases table columns: {e}")
+    
+    conn.commit()
+    print("Database verification complete")
+
+# Run database verification at startup
+verify_database_integrity()
+
 # Create tables if they don't exist
 cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
@@ -34,6 +117,7 @@ cursor.execute("""
         user_id INTEGER,  -- ID of user who made the purchase
         event_id INTEGER,  -- ID of event for which ticket was purchased
         ticket_type TEXT,  -- Type of ticket (Regular or VIP)
+        purchase_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  -- Date and time of purchase
         FOREIGN KEY(user_id) REFERENCES users(id),  -- Foreign key constraint to users table
         FOREIGN KEY(event_id) REFERENCES events(id)  -- Foreign key constraint to events table
     )
@@ -117,8 +201,16 @@ def handle_client(client_socket):
             elif action == "login":  # Handle user login
                 username = request.get("username")  # Get username from request
                 password = request.get("password")  # Get password from request
-                # Query database for matching username and password
-                cursor.execute("SELECT id, points FROM users WHERE username = ? AND password = ?", (username, password))
+                
+                # ############################################################
+                # ################ SQL INJECTION VULNERABILITY ###############
+                # ############################################################
+                # Using string formatting to construct SQL queries is highly vulnerable
+                # This allows attackers to bypass authentication or extract data
+                
+                # Vulnerable SQL query construction
+                query = f"SELECT id, points FROM users WHERE username = '{username}' AND password = '{password}'"
+                cursor.execute(query)
                 user = cursor.fetchone()  # Get first matching row
                 if user:  # Check if user was found
                     # Send success response with user ID and points
@@ -128,6 +220,18 @@ def handle_client(client_socket):
                     send_response(client_socket, {"status": "error", "message": "Invalid credentials"})
 
             elif action == "view_events":  # Handle request to view all events
+                # ############################################################
+                # ################ PATH TRAVERSAL VULNERABILITY ##############
+                # ############################################################
+                # This simulates a vulnerability where the system would read
+                # event data from files based on user input without proper validation
+                
+                # For demonstration, we'll simulate the vulnerability with a comment
+                # The actual vulnerability would be:
+                # event_file = request.get("event_file", "events.txt")
+                # with open(event_file, 'r') as f:  # Vulnerable to path traversal like "../../../etc/passwd"
+                #     data = f.read()
+                
                 cursor.execute("SELECT * FROM events")  # Query all events from database
                 events = cursor.fetchall()  # Get all rows from the query
                 # Format events data for JSON serialization
@@ -210,10 +314,136 @@ def handle_client(client_socket):
                     conn.commit()
                     send_response(client_socket, {"status": "success", "message": f"Added {amount} points to user {userid}"})
             elif action == "view_purchases":
-                user_id = request.get("user_id")
-                cursor.execute("SELECT * FROM purchases WHERE user_id is ? ORDER BY id DESC", (user_id,))
-                purchases = cursor.fetchall()
-                send_response(client_socket, {"status": "success", "purchases": purchases})
+                try:
+                    user_id = request.get("user_id")
+                    print(f"Processing view_purchases for user_id: {user_id}")  # Debug output
+                    
+                    if not user_id:
+                        print("Error: Missing user_id in request")  # Debug output
+                        send_response(client_socket, {"status": "error", "message": "User ID is required"})
+                        return
+                        
+                    # First verify the user exists
+                    cursor.execute("SELECT id FROM users WHERE id = ?", (user_id,))
+                    user_result = cursor.fetchone()
+                    if not user_result:
+                        print(f"Error: User {user_id} not found in database")  # Debug output
+                        send_response(client_socket, {"status": "error", "message": "User not found"})
+                        return
+
+                    try:
+                        # Check if purchases table exists
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='purchases'")
+                        if not cursor.fetchone():
+                            print("Error: Purchases table does not exist")  # Debug output
+                            send_response(client_socket, {"status": "error", "message": "Purchases table does not exist"})
+                            return
+                            
+                        # Check if events table exists
+                        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events'")
+                        if not cursor.fetchone():
+                            print("Error: Events table does not exist")  # Debug output
+                            send_response(client_socket, {"status": "error", "message": "Events table does not exist"})
+                            return
+                    except sqlite3.Error as e:
+                        print(f"Database error checking tables: {e}")  # Debug output
+                        send_response(client_socket, {"status": "error", "message": f"Database error checking tables: {str(e)}"})
+                        return
+
+                    # Use LEFT JOIN to handle cases where event might have been deleted
+                    try:
+                        print("Executing purchases query...")  # Debug output
+                        query = """
+                            SELECT p.id, p.event_id, p.ticket_type, p.purchase_date, 
+                                   COALESCE(e.name, 'Unknown Event') as event_name
+                            FROM purchases p
+                            LEFT JOIN events e ON p.event_id = e.id
+                            WHERE p.user_id = ? 
+                            ORDER BY p.id DESC
+                        """
+                        print(f"Query: {query}")  # Debug output
+                        cursor.execute(query, (user_id,))
+                        purchases = cursor.fetchall()
+                        print(f"Found {len(purchases)} purchases")  # Debug output
+                        
+                        if not purchases:
+                            send_response(client_socket, {"status": "success", "purchases": [], "message": "No purchases found"})
+                        else:
+                            send_response(client_socket, {"status": "success", "purchases": purchases})
+                    except sqlite3.Error as e:
+                        error_msg = f"Database error in purchases query: {str(e)}"
+                        print(error_msg)  # Debug output
+                        send_response(client_socket, {"status": "error", "message": error_msg})
+                        return
+                        
+                except sqlite3.Error as e:
+                    error_msg = f"Database error in view_purchases: {str(e)}"
+                    print(error_msg)  # Debug output
+                    send_response(client_socket, {"status": "error", "message": error_msg})
+                except Exception as e:
+                    error_msg = f"Error in view_purchases: {str(e)}"
+                    print(error_msg)  # Debug output
+                    send_response(client_socket, {"status": "error", "message": error_msg})
+                
+            # Add a diagnostic action
+            elif action == "diagnose_db":
+                try:
+                    # Check all tables
+                    tables_result = {}
+                    for table in ["users", "events", "purchases"]:
+                        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                        count = cursor.fetchone()[0]
+                        cursor.execute(f"PRAGMA table_info({table})")
+                        columns = [col[1] for col in cursor.fetchall()]
+                        tables_result[table] = {
+                            "count": count,
+                            "columns": columns
+                        }
+                    
+                    # Test a sample query
+                    test_query_result = {}
+                    if tables_result["users"]["count"] > 0:
+                        # Get a sample user
+                        cursor.execute("SELECT id FROM users LIMIT 1")
+                        test_user_id = cursor.fetchone()[0]
+                        test_query_result["sample_user_id"] = test_user_id
+                        
+                        # Try the purchases query
+                        try:
+                            cursor.execute("""
+                                SELECT p.id, p.event_id, p.ticket_type, p.purchase_date, 
+                                       COALESCE(e.name, 'Unknown Event') as event_name
+                                FROM purchases p
+                                LEFT JOIN events e ON p.event_id = e.id
+                                WHERE p.user_id = ? 
+                                ORDER BY p.id DESC
+                            """, (test_user_id,))
+                            sample_purchases = cursor.fetchall()
+                            test_query_result["sample_purchases_count"] = len(sample_purchases)
+                            test_query_result["sample_purchase_data"] = sample_purchases[:1] if sample_purchases else []
+                        except sqlite3.Error as e:
+                            test_query_result["error"] = str(e)
+                    
+                    # Check foreign keys status
+                    cursor.execute("PRAGMA foreign_keys")
+                    foreign_keys_enabled = cursor.fetchone()[0]
+                    
+                    diagnosis = {
+                        "tables": tables_result,
+                        "test_query": test_query_result,
+                        "foreign_keys_enabled": foreign_keys_enabled
+                    }
+                    
+                    send_response(client_socket, {
+                        "status": "success", 
+                        "message": "Database diagnosis complete", 
+                        "diagnosis": diagnosis
+                    })
+                except Exception as e:
+                    send_response(client_socket, {
+                        "status": "error", 
+                        "message": f"Diagnosis error: {str(e)}"
+                    })
                 
         except Exception as e:  # Handle any exceptions that occur
             print("Error:", e)  # Print error to server console
