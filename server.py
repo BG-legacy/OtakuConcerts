@@ -202,15 +202,10 @@ def handle_client(client_socket):
                 username = request.get("username")  # Get username from request
                 password = request.get("password")  # Get password from request
                 
-                # ############################################################
-                # ################ SQL INJECTION VULNERABILITY ###############
-                # ############################################################
-                # Using string formatting to construct SQL queries is highly vulnerable
-                # This allows attackers to bypass authentication or extract data
-                
-                # Vulnerable SQL query construction
-                query = f"SELECT id, points FROM users WHERE username = '{username}' AND password = '{password}'"
-                cursor.execute(query)
+                # VULNERABILITY: SQL INJECTION - Direct string concatenation in SQL query
+                # This allows attackers to inject malicious SQL code through the username or password fields
+                # Example attack: username = "admin' --" would bypass password check
+                cursor.execute(f"SELECT id, points FROM users WHERE username = '{username}' AND password = '{password}'")
                 user = cursor.fetchone()  # Get first matching row
                 if user:  # Check if user was found
                     # Send success response with user ID and points
@@ -220,18 +215,6 @@ def handle_client(client_socket):
                     send_response(client_socket, {"status": "error", "message": "Invalid credentials"})
 
             elif action == "view_events":  # Handle request to view all events
-                # ############################################################
-                # ################ PATH TRAVERSAL VULNERABILITY ##############
-                # ############################################################
-                # This simulates a vulnerability where the system would read
-                # event data from files based on user input without proper validation
-                
-                # For demonstration, we'll simulate the vulnerability with a comment
-                # The actual vulnerability would be:
-                # event_file = request.get("event_file", "events.txt")
-                # with open(event_file, 'r') as f:  # Vulnerable to path traversal like "../../../etc/passwd"
-                #     data = f.read()
-                
                 cursor.execute("SELECT * FROM events")  # Query all events from database
                 events = cursor.fetchall()  # Get all rows from the query
                 # Format events data for JSON serialization

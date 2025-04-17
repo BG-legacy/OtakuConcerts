@@ -78,12 +78,6 @@ def login():
     username = input("Enter username: ")  # Prompt user for username
     password = input("Enter password: ")  # Prompt user for password
     
-    # ############################################################
-    # ################ SQL INJECTION VULNERABILITY ###############
-    # ############################################################
-    # Directly concatenating user input into the request without sanitization
-    # This allows attackers to inject SQL code through the username/password fields
-    
     # Send login request to server with credentials
     response = send_request("login", {"username": username, "password": password})
     if response["status"] == "success":  # Check if login was successful
@@ -198,32 +192,21 @@ def add_funds():
     try:
         amount = input("Enter amount to add: ")  # Prompt for amount to add
         
-        # ############################################################
-        # ############## COMMAND INJECTION VULNERABILITY #############
-        # ############################################################
-        # Directly using unsanitized user input which could contain shell commands
-        # For demonstration, we'll pretend this executes a system command with the amount
-        print(f"Processing amount: {amount}")
+        # VULNERABILITY: COMMAND INJECTION - Using eval() on user input
+        # This allows attackers to execute arbitrary Python code
+        # Example attack: amount = "__import__('os').system('rm -rf /')" would delete files
+        amount = eval(amount)
         
-        # This would be vulnerable if it were implemented as:
-        # import os
-        # os.system(f"echo Processing amount: {amount}")
-        # But we're just simulating the vulnerability
+        if amount <= 0:
+            print("Amount must be greater than 0.")
+            return
+            
+        # Send request to add funds
+        response = send_request("add_funds", {"userid": user_id, "amount": amount})
+        print(response["message"])  # Display response message from server
         
-        try:
-            amount_int = int(amount)
-            if amount_int <= 0:
-                print("Amount must be greater than 0.")
-                return
-            
-            # Send request to add funds
-            response = send_request("add_funds", {"userid": user_id, "amount": amount_int})
-            print(response["message"])  # Display response message from server
-            
-            if response["status"] == "success":  # Check if request was successful
-                check_points()  # Refresh points balance from server
-        except ValueError:
-            print("Please enter a valid number.")
+        if response["status"] == "success":  # Check if request was successful
+            check_points()  # Refresh points balance from server
     except ValueError:
         print("Please enter a valid number.")
 
